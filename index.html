@@ -1,0 +1,105 @@
+Jogo da Memória(local)
+import tkinter as tk
+from tkinter import messagebox
+import random
+
+
+janela = tk.Tk()
+janela.title("Jogo da Memória 4x5")
+janela.geometry("800x900")  
+janela.resizable(False, False)
+
+
+pares = ['🍎', '🍌', '🍇', '🍉', '🍓', '🍒', '🥝', '🍑', '🍍', '🍊']
+valores = pares * 2
+random.shuffle(valores)
+
+
+botoes = []
+cartas_mostradas = []
+indice_mostrado = []
+jogador_atual = 1
+pontos = {1: 0, 2: 0}
+pares_encontrados = 0
+linhas, colunas = 4, 5
+
+
+status = tk.Label(janela, text="Jogador 1 começa", font=("Arial", 14))
+status.pack(pady=10)
+
+
+tabuleiro_frame = tk.Frame(janela)
+tabuleiro_frame.pack(expand=True)
+
+
+def atualizar_status():
+    status.config(text=f"Jogador {jogador_atual} - Pontos: {pontos[1]} x {pontos[2]}")
+
+
+def clique(indice):
+    global jogador_atual, cartas_mostradas, indice_mostrado, pares_encontrados
+
+    botao = botoes[indice]
+    if botao["state"] == "disabled" or len(cartas_mostradas) == 2:
+        return
+
+    botao.config(text=valores[indice])
+    cartas_mostradas.append(valores[indice])
+    indice_mostrado.append(indice)
+
+    if len(cartas_mostradas) == 2:
+        janela.update()
+        janela.after(1000, verificar_par)
+
+
+def verificar_par():
+    global jogador_atual, cartas_mostradas, indice_mostrado, pares_encontrados
+
+    i1, i2 = indice_mostrado
+    if cartas_mostradas[0] == cartas_mostradas[1]:
+        botoes[i1].config(state="disabled")
+        botoes[i2].config(state="disabled")
+        pontos[jogador_atual] += 1
+        pares_encontrados += 1
+        atualizar_status()
+        if pares_encontrados == 10:
+            fim_de_jogo()
+
+    else:
+        botoes[i1].config(text="❓")
+        botoes[i2].config(text="❓")
+        jogador_atual = 2 if jogador_atual == 1 else 1
+        atualizar_status()
+
+    cartas_mostradas.clear()
+    indice_mostrado.clear()
+
+
+def fim_de_jogo():
+    if pontos[1] > pontos[2]:
+        vencedor = "Jogador 1 venceu!"
+    elif pontos[2] > pontos[1]:
+        vencedor = "Jogador 2 venceu!"
+    else:
+        vencedor = "Empate!"
+
+    messagebox.showinfo("Fim de Jogo", f"{vencedor}\nPlacar: {pontos[1]} x {pontos[2]}")
+    janela.destroy()
+
+
+for i in range(linhas):
+    for j in range(colunas):
+        indice = i * colunas + j
+        botao = tk.Button(tabuleiro_frame, text="❓", font=("Arial", 20), width=4, height=2,
+                          command=lambda idx=indice: clique(idx))
+        botao.grid(row=i, column=j, padx=5, pady=5)
+        botoes.append(botao)
+
+
+janela.mainloop()
+
+
+
+
+
+
