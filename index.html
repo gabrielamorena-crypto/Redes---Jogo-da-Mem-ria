@@ -1,4 +1,4 @@
-Jogo da Memória(local)
+Jogo da Memória (local)
 
 import tkinter as tk
 from tkinter import messagebox
@@ -98,6 +98,428 @@ for i in range(linhas):
 
 
 janela.mainloop()
+
+Players.py
+
+import tkinter as tk
+from tkinter import messagebox
+import socket
+import threading
+
+class JogoMemoria:
+    #janela base para o jogo
+    def __init__(self):
+        self.janela = tk.Tk()
+        self.janela.title("Jogo da Memória")
+        self.janela.geometry("600x700")
+        self.janela.config(bg = "#b5d8ff")
+        
+        self.botoes = []
+        self.minha_vez = False
+        self.meu_id = None
+        self.pontos = {1: 0, 2: 0}
+        self.protocolo = "TCP"
+        self.host_ip = "::1"  # IPv6 localhost, pode ser alterado para "127.0.0.1" para IPv4
+        
+        self.criar_menu_inicial()
+        self.janela.mainloop()
+    
+    #janela de menu inicial
+    def criar_menu_inicial(self):
+        self.frame_menu = tk.Frame(self.janela)
+        self.frame_menu.pack(pady=100)
+        self.frame_menu.config(bg = "#b5d8ff")
+        
+        tk.Label(self.frame_menu, text="Configurações de Conexão", font=("Arial", 16), bg = "#b5d8ff").grid(row=0, columnspan=2, pady=20)
+        
+        # Seleção de protocolo
+        tk.Label(self.frame_menu, text="Protocolo:", bg = "#b5d8ff").grid(row=1, column=0, sticky="e", padx=5, pady=5)
+        self.protocolo_var = tk.StringVar(value="TCP")
+        tk.OptionMenu(self.frame_menu, self.protocolo_var, "TCP", "UDP").grid(row=1, column=1, sticky="w", padx=5, pady=5)
+        
+        # Entrada de IP
+        tk.Label(self.frame_menu, text="IP do Servidor:", bg = "#b5d8ff").grid(row=2, column=0, sticky="e", padx=5, pady=5)
+        self.ip_entry = tk.Entry(self.frame_menu)
+        self.ip_entry.grid(row=2, column=1, padx=5, pady=5)
+        self.ip_entry.insert(0, "::1")  # IPv6 localhost por padrão
+        
+        # Botão de conexão
+        tk.Button(self.frame_menu, text="Conectar", command=self.iniciar_jogo, bg = "#7290b3", fg = "#ffffff").grid(row=3, columnspan=2, pady=20)
+    
+    #verifica o ip e o protocolo para realizar a conexão
+    def iniciar_jogo(self):
+        self.protocolo = self.protocolo_var.get()
+        self.host_ip = self.ip_entry.get()
+        
+        if not self.host_ip:
+            messagebox.showerror("Erro", "Por favor, insira o IP do servidor")
+            return
+            
+        self.frame_menu.destroy()
+        self.criar_interface()
+        
+        try:
+            if self.protocolo == "TCP":
+                # Cria socket IPv6 ou IPv4 dependendo do endereço fornecido
+                if ':' in self.host_ip:  # Se for um endereço IPv6
+                    self.conexao = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+                else:  # Se for IPv4
+                    self.conexao = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                self.conexao.connect((self.host_ip, 12345))
+            else:  # UDP
+                if ':' in self.host_ip:  # Se for um endereço IPv6
+                    self.conexao = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+                else:  # Se for IPv4
+                    self.conexao = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+                self.conexao.sendto(b"CONNECT", (self.host_ip, 12345))
+                msg, _ = self.conexao.recvfrom(1024)
+                if msg.startswith(b"ID"):
+                    self.meu_id = int(msg.decode().split()[1])
+            
+            if self.protocolo == "TCP":
+                msg = self.conexao.recv(1024).decode()
+                if msg.startswith("ID"):
+                    self.meu_id = int(msg.split()[1])
+            
+            self.atualizar_status()
+            threading.Thread(target=self.receber_mensagens, daemon=True).start()
+            
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha na conexão: {e}")
+            self.janela.destroy()
+    
+    #cria interface para a lógica do jogo
+    def criar_interface(self):
+        self.status = tk.Label(self.janela, text="Conectando...",bg = "#b5d8ff", font=("Arial", 14))
+        self.status.pack(pady=10)
+        
+        self.tabuleiro = tk.Frame(self.janela)
+        self.tabuleiro.pack()
+        self.tabuleiro.config(bg = "#b5d8ff")
+        
+        for i in range(20):
+            btn = tk.Button(self.tabuleiro, text="❓", font=("Arial", 20), width=4, height=2, bg = "#83a3c7", fg = "#ffffff",
+                          command=lambda idx=i: self.clicar_carta(idx))
+            btn.grid(row=i//5, column=i%5, padx=5, pady=5)
+            self.botoes.append(btn)
+    
+    #realiza troca de mensagens com o servidor
+    def clicar_carta(self, indice):
+        if self.minha_vez and self.botoes[indice]["state"] == "normal":
+            try:
+                mensagem = f"CLIQUE {indice}".encode()
+                if self.protocolo == "TCP":
+                    self.conexao.sendall(mensagem)
+                else:  # UDP
+                    self.conexao.sendto(mensagem, (self.host_ip, 12345))
+            except:
+                messagebox.showerror("Erro", "Problema na conexão")
+    
+    def receber_mensagens(self):
+        while True:
+            try:
+                if self.protocolo == "TCP":
+                    msg = self.conexao.recv(1024).decode()
+                    if not msg:
+                        break
+                    self.processar_mensagem(msg)
+                else:  # UDP
+                    msg, _ = self.conexao.recvfrom(1024)
+                    msg = msg.decode()
+                    print(f"[CLIENTE] Mensagem recebida: {msg}")  # DEBUG
+                    self.processar_mensagem(msg)
+                    
+            except Exception as e:
+                print(f"Erro: {e}")
+                break
+    
+    #processa as informações trocadas
+    def processar_mensagem(self, msg):
+        if msg.startswith("MOSTRAR"):
+            _, indice, emoji = msg.split()
+            self.botoes[int(indice)].config(text=emoji)
+        #esconde as cartas caso não seja encontrado um par
+        elif msg.startswith("ESCONDER"):
+            _, c1, c2 = msg.split()
+            self.botoes[int(c1)].config(text="❓", state="normal", bg = "#96bfe3")  # quando exposta, a carta fica com uma coloração mais clara
+            self.botoes[int(c2)].config(text="❓", state="normal", bg = "#96bfe3")  # quando exposta, a carta fica com uma coloração mais clara
+        #define um acerto
+        elif msg.startswith("ACERTO"):
+            _, c1, c2, jogador = msg.split()
+            self.botoes[int(c1)].config(state="disabled", bg = "#b6f2cf", fg = "#000000") #quando um par é revelado, a carta fica verde
+            self.botoes[int(c2)].config(state="disabled", bg = "#b6f2cf", fg = "#000000") #quando um par é revelado, a carta fica verde
+            self.pontos[int(jogador)] += 1
+            self.atualizar_status()
+        #define a vez do jogador
+        elif msg.startswith("VEZ"):
+            _, jogador = msg.split()
+            self.minha_vez = (int(jogador) == self.meu_id)
+            # Reabilitar todas as cartas não reveladas quando é a vez do jogador
+            if self.minha_vez:
+                for i, btn in enumerate(self.botoes):
+                    if btn["state"] == "disabled":
+                        continue  # Mantém cartas já acertadas desabilitadas
+                    btn.config(state="normal")
+            self.atualizar_status()
+        
+        elif msg.startswith("FIM"):
+            partes = msg.split()
+            if len(partes) >= 2:
+                _, vencedor = partes[:2]
+                if vencedor == "0":
+                    resultado = "EMPATE!"
+                else:
+                    resultado = f"JOGADOR {vencedor} VENCEU!"
+                
+                mensagem_final = f"""
+                {resultado}
+                
+                PLACAR FINAL:
+                Jogador 1: {self.pontos[1]} pontos
+                Jogador 2: {self.pontos[2]} pontos
+                """
+                messagebox.showinfo("Fim do Jogo", mensagem_final)
+                self.janela.destroy()
+    
+    #atualiza status de placar e vez
+    def atualizar_status(self):
+        texto = f"Jogador {self.meu_id} | Pontos: {self.pontos[1]} x {self.pontos[2]} | "
+        texto += "SUA VEZ!" if self.minha_vez else "Aguardando adversário..."
+        self.status.config(text=texto)
+
+if __name__ == "__main__":
+    JogoMemoria()
+
+Server.py
+
+import socket
+import threading
+import random
+import time
+
+HOST = "::"  # Escuta em todos os endereços IPv6 e IPv4
+PORT = 12345
+
+class ServidorMemoria:
+    #define as variáveis globais para o servidor, além de funções básicas como socket
+    def __init__(self):
+        self.jogadores = {}  # id -> (protocolo, conexão/endereço)
+        self.vez = 1
+        self.cartas = []
+        self.reveladas = []
+        self.pontos = {1: 0, 2: 0}
+        self.lock = threading.Lock()
+        self.jogadores_conectados = 0
+        self.max_jogadores = 2
+        
+        self.gerar_cartas()
+        print(f"Servidor iniciado na porta {PORT} (suporta TCP e UDP simultaneamente para IPv4 e IPv6)")
+
+        # Sockets TCP IPv6 (que também aceita IPv4)
+        self.sock_tcp = socket.socket(socket.AF_INET6, socket.SOCK_STREAM)
+        self.sock_tcp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock_tcp.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)  # Permite IPv4 e IPv6
+        self.sock_tcp.bind((HOST, PORT))
+        self.sock_tcp.listen(2)
+        
+        # Sockets UDP IPv6 (que também aceita IPv4)
+        self.sock_udp = socket.socket(socket.AF_INET6, socket.SOCK_DGRAM)
+        self.sock_udp.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.sock_udp.setsockopt(socket.IPPROTO_IPV6, socket.IPV6_V6ONLY, 0)  # Permite IPv4 e IPv6
+        self.sock_udp.bind((HOST, PORT))
+
+        # Threads
+        threading.Thread(target=self.aceitar_conexoes_tcp, daemon=True).start()
+        threading.Thread(target=self.aceitar_conexoes_udp, daemon=True).start()
+    
+    #gera as cartas
+    def gerar_cartas(self):
+        emojis = ["🍎", "🍌", "🍇", "🍓", "🍍", "🥝", "🍉", "🍒", "🥥", "🍑"]
+        pares = emojis[:10] * 2  
+        random.shuffle(pares)
+        self.cartas = pares
+        self.reveladas = [False] * 20
+    
+    #torna o servidor apropriado para conexões TCP
+    def aceitar_conexoes_tcp(self):
+        while self.jogadores_conectados < self.max_jogadores:
+            try:
+                conn, addr = self.sock_tcp.accept()
+                with self.lock:
+                    if self.jogadores_conectados >= self.max_jogadores:
+                        conn.close()
+                        continue
+                    
+                    jogador_id = self.jogadores_conectados + 1
+                    self.jogadores[jogador_id] = ("TCP", conn)
+                    self.jogadores_conectados += 1
+                    
+                    print(f"Jogador {jogador_id} conectado via TCP: {addr}")
+                    conn.sendall(f"ID {jogador_id}".encode())
+                    
+                    threading.Thread(target=self.receber_tcp, args=(jogador_id,), daemon=True).start()
+                    
+                    if self.jogadores_conectados == self.max_jogadores:
+                        self.iniciar_partida()
+            except Exception as e:
+                print(f"Erro TCP: {e}")
+                break
+    
+    #recebe TCP
+    def receber_tcp(self, jogador_id):
+        conn = self.jogadores[jogador_id][1]
+        while True:
+            try:
+                msg = conn.recv(1024).decode()
+                if not msg:
+                    break
+                self.processar_comando(jogador_id, msg)
+            except:
+                break
+        self.encerrar_conexao(jogador_id)
+    
+    #torna o servidor apto a receber UDP
+    def aceitar_conexoes_udp(self):
+        while True:  # Ouvir sempre, não só até encher jogadores
+            try:
+                msg, addr = self.sock_udp.recvfrom(1024)
+                msg_decod = msg.decode()
+
+                if msg_decod == "CONNECT":
+                    with self.lock:
+                        if self.jogadores_conectados >= self.max_jogadores:
+                            self.sock_udp.sendto(b"FULL", addr)
+                            continue
+                        
+                        jogador_id = self.jogadores_conectados + 1
+                        self.jogadores[jogador_id] = ("UDP", addr)
+                        self.jogadores_conectados += 1
+                        
+                        print(f"Jogador {jogador_id} conectado via UDP: {addr}")
+                        self.sock_udp.sendto(f"ID {jogador_id}".encode(), addr)
+                        
+                        if self.jogadores_conectados == self.max_jogadores:
+                            self.iniciar_partida()
+                
+                elif msg_decod.startswith("CLIQUE"):
+                    # Descobrir qual jogador enviou
+                    for jid, (proto, endereco) in self.jogadores.items():
+                        if proto == "UDP" and endereco == addr:
+                            self.processar_comando(jid, msg_decod)
+                            break
+
+            except Exception as e:
+                print(f"Erro UDP: {e}")
+                break
+
+    def encerrar_conexao(self, jogador_id):
+        with self.lock:
+            if jogador_id in self.jogadores:
+                protocolo, conn = self.jogadores[jogador_id]
+                if protocolo == "TCP":
+                    try:
+                        conn.close()
+                    except:
+                        pass
+                del self.jogadores[jogador_id]
+                self.jogadores_conectados -= 1
+                print(f"Jogador {jogador_id} desconectado")
+
+    def iniciar_partida(self):
+        print("Partida iniciada!")
+        self.enviar_para_todos(f"VEZ {self.vez}")
+
+    def processar_comando(self, jogador_id, comando):
+        if not comando.startswith("CLIQUE"):
+            return
+        
+        with self.lock:
+            if jogador_id != self.vez:
+                return
+            
+            _, indice = comando.split()
+            indice = int(indice)
+
+            if hasattr(self, "primeira_carta") and self.primeira_carta == indice:
+                return  
+            
+            self.enviar_para_todos(f"MOSTRAR {indice} {self.cartas[indice]}")
+            self.reveladas[indice] = True
+
+            if not hasattr(self, "primeira_carta"):
+                self.primeira_carta = indice
+            else:
+                segunda = indice
+                if self.cartas[self.primeira_carta] == self.cartas[segunda]:
+                    self.enviar_para_todos(f"ACERTO {self.primeira_carta} {segunda} {jogador_id}")
+                    self.pontos[jogador_id] += 1
+                else:
+                    time.sleep(1)
+                    self.enviar_para_todos(f"ESCONDER {self.primeira_carta} {segunda}")
+                    self.reveladas[self.primeira_carta] = False
+                    self.reveladas[segunda] = False
+                    self.vez = 1 if self.vez == 2 else 2
+                    self.enviar_para_todos(f"VEZ {self.vez}")
+                del self.primeira_carta
+
+                if all(self.reveladas):
+                    print("Todas as cartas reveladas! Fim do jogo.") # Adicionado para depuração
+                    vencedor = self.definir_vencedor()
+                    print(f"Vencedor definido: {vencedor}") # Adicionado para depuração
+                    self.enviar_mensagem_final(vencedor)
+
+    def definir_vencedor(self):
+        if self.pontos[1] > self.pontos[2]:
+            return 1
+        elif self.pontos[2] > self.pontos[1]:
+            return 2
+        else:
+            return 0
+
+    def enviar_para_todos(self, mensagem):
+        for jid in self.jogadores:
+            protocolo, conn = self.jogadores[jid]
+            if protocolo == "TCP":
+                try:
+                    conn.sendall(mensagem.encode())
+                except:
+                    pass
+            else:  # UDP
+                try:
+                    self.sock_udp.sendto(mensagem.encode(), conn)
+                except:
+                    pass
+
+    def enviar_mensagem_final(self, vencedor):
+        time.sleep(0.5)
+        print(f"Enviando mensagem final para todos. Vencedor: {vencedor}") # Adicionado para depuração
+        for jid in self.jogadores:
+            protocolo, conn = self.jogadores[jid]
+            if vencedor == 0:
+                mensagem = f"FIM 0 Empate! Ninguém venceu."
+            elif vencedor == jid:
+                mensagem = f"FIM {vencedor} Você venceu! Parabéns!"
+            else:
+                mensagem = f"FIM {vencedor} Você perdeu. Tente novamente!"
+            
+            print(f"Servidor enviando para Jogador {jid} ({protocolo}): '{mensagem}'") # Adicionado para depuração
+            if protocolo == "TCP":
+                try:
+                    conn.sendall(mensagem.encode())
+                except Exception as e: # Capturar a exceção para ver o erro
+                    print(f"Erro ao enviar mensagem final TCP para Jogador {jid}: {e}")
+            else:  # UDP
+                try:
+                    self.sock_udp.sendto(mensagem.encode(), conn)
+                except Exception as e: # Capturar a exceção para ver o erro
+                    print(f"Erro ao enviar mensagem final UDP para Jogador {jid}: {e}")
+
+if __name__ == "__main__":
+    print("Iniciando servidor (suporta TCP e UDP simultaneamente para IPv4 e IPv6)...")
+    ServidorMemoria()
+    while True:
+        time.sleep(1)
+
 
 
 
